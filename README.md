@@ -120,16 +120,34 @@ will auto-generate this from `springdoc-openapi` — see `pom.xml`).
 
 ```bash
 # 1. Start Postgres
-docker compose up -d
+docker compose up -d postgres
 
 # 2. Run migrations + start the app
 ./mvnw spring-boot:run
 
-# 3. Run tests (spins up a real Postgres via Testcontainers)
+# 3a. Unit tests + LedgerReconciliationTest (needs Docker for Testcontainers)
 ./mvnw test
+
+# 3b. Full gate: unit + all Testcontainers integration tests
+./mvnw verify
+
+# 4. (optional) seed 25 users + 1,200+ transactions and print a reconciliation report
+./scripts/seed_transactions.sh          # or: ./mvnw spring-boot:run -Dspring-boot.run.profiles=seed
 ```
 
-App runs on `http://localhost:8080`. Swagger UI at `/swagger-ui.html`.
+App runs on `http://localhost:8080`. Swagger UI at `/swagger-ui.html`,
+OpenAPI JSON at `/v3/api-docs`.
+
+Three mock lenders are seeded by Flyway on first start: `QUICKCASH` (flat
+rate), `PRUDENT` (reducing balance), `STARTER` (small limits).
+
+### Docker note
+
+Testcontainers needs a Docker endpoint it can reach. On Docker Desktop for
+Windows/Mac, if `./mvnw verify` reports "Could not find a valid Docker
+environment", the bundled Docker client version may not negotiate the API —
+this project pins Testcontainers 1.21.x which handles it. As a fallback,
+enable *Settings → Advanced → Expose daemon on tcp://localhost:2375*.
 
 ---
 
@@ -148,12 +166,16 @@ globally. Run it with:
 
 ## Build Roadmap
 
-- [ ] Core domain models + Flyway schema + `CreditLine` state machine + unit tests
-- [ ] `Transaction` + double-entry `LedgerService` + idempotency handling
-- [ ] Interest strategies + `RepaymentSchedule` generation (EMI math)
-- [ ] Mock underwriting rule engine
-- [ ] Docker Compose + GitHub Actions CI
-- [ ] Testcontainers integration tests + seed script for 1,000+ transactions
-- [ ] Swagger docs polish + this README's diagrams verified against final code
+- [x] Core domain models + Flyway schema + `CreditLine` state machine + unit tests
+- [x] `Transaction` + double-entry `LedgerService` + idempotency handling
+- [x] Interest strategies + `RepaymentSchedule` generation (EMI math)
+- [x] Mock underwriting rule engine
+- [x] Docker Compose + GitHub Actions CI
+- [x] Testcontainers integration tests + seed script for 1,000+ transactions
+- [x] Swagger docs + REST layer for every endpoint above
+
+Current test coverage: ~145 unit tests (`mvn test`) plus ~28 Testcontainers
+integration tests (`mvn verify`), including 4 concurrency tests and a
+1,200-transaction `LedgerReconciliationTest`.
 
 See `CLAUDE.md` for detailed build instructions and conventions for AI-assisted development in this repo.

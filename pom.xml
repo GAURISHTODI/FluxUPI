@@ -19,7 +19,27 @@
 
     <properties>
         <java.version>21</java.version>
+        <testcontainers.version>1.21.4</testcontainers.version>
+        <!--
+          Spring Boot's test support initialises Mockito's inline mock maker,
+          which self-attaches a Byte Buddy agent. Recent JDKs refuse a silent
+          self-attach; this flag re-permits it for the test JVM so the shared
+          Spring test context can start.
+        -->
+        <argLine>-XX:+EnableDynamicAgentLoading -Djdk.attach.allowAttachSelf=true -Xshare:off</argLine>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <!-- Core web + data -->
@@ -74,13 +94,11 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>1.20.1</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>postgresql</artifactId>
-            <version>1.20.1</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -98,6 +116,26 @@
                         </exclude>
                     </excludes>
                 </configuration>
+            </plugin>
+
+            <!--
+              Integration tests (*IT) exercise real Postgres via Testcontainers:
+              row locks, the idempotency unique constraint, and the deferred
+              ledger-balance trigger. They run in the `verify` phase so `mvn test`
+              stays fast for the inner loop while `mvn verify` is the full gate
+              that CI runs.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>
