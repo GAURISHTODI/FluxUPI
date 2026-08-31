@@ -26,7 +26,7 @@
           self-attach; this flag re-permits it for the test JVM so the shared
           Spring test context can start.
         -->
-        <argLine>-XX:+EnableDynamicAgentLoading -Djdk.attach.allowAttachSelf=true -Xshare:off</argLine>
+        <argLine>-XX:+EnableDynamicAgentLoading -Djdk.attach.allowAttachSelf=true</argLine>
     </properties>
 
     <dependencyManagement>

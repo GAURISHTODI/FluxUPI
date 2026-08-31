@@ -3,6 +3,7 @@ package com.fluxupi.transaction;
 import com.fluxupi.AbstractIntegrationTest;
 import com.fluxupi.TestDataFactory;
 import com.fluxupi.common.Money;
+import com.fluxupi.common.exception.IllegalStateTransitionException;
 import com.fluxupi.common.exception.InsufficientCreditLimitException;
 import com.fluxupi.creditline.CreditLine;
 import com.fluxupi.creditline.CreditLineRepository;
@@ -144,6 +145,40 @@ class ConcurrentSpendIT extends AbstractIntegrationTest {
                 .subtract(Money.of(5_000))
                 .add(Money.of(4_000));
         assertThat(reloaded.getAvailableLimit()).isEqualByComparingTo(expectedAvailable);
+        assertThat(ledgerService.reconcile().isBalanced()).isTrue();
+    }
+
+    @Test
+    @DisplayName("many threads racing to reverse the same spend: it is unwound exactly once")
+    void concurrentReversalsOfOneSpendCreditTheLimitOnlyOnce() throws Exception {
+        CreditLine line = testData.persistActiveCreditLine(Money.of(10_000));
+        var spend = transactionService.spend(new SpendCommand(line.getId(), Money.of(4_000),
+                "merchant@fluxbank", "to be reversed", UUID.randomUUID().toString()));
+        UUID spendId = spend.transaction().getId();
+        assertThat(creditLineRepository.findById(line.getId()).orElseThrow().getAvailableLimit())
+                .isEqualByComparingTo(Money.of(6_000));
+
+        // Eight threads each try to reverse it, every one with its own fresh key
+        // so idempotency cannot mask a double-unwind — the SUCCESS -> REVERSED
+        // state transition is the only thing standing between them.
+        List<Outcome> outcomes = runConcurrently(8, i ->
+                transactionService.reverse(spendId, "concurrent refund " + i, UUID.randomUUID().toString()));
+
+        long succeeded = outcomes.stream().filter(Outcome::ok).count();
+        long rejected = outcomes.stream()
+                .filter(o -> o.error() instanceof IllegalStateTransitionException)
+                .count();
+
+        assertThat(succeeded)
+                .as("exactly one reversal may take effect, or the limit is credited twice")
+                .isEqualTo(1);
+        assertThat(rejected).isEqualTo(7);
+
+        CreditLine reloaded = creditLineRepository.findById(line.getId()).orElseThrow();
+        assertThat(reloaded.getAvailableLimit())
+                .as("limit restored once, not eight times")
+                .isEqualByComparingTo(Money.of(10_000));
+        assertThat(reloaded.getUtilizedLimit()).isEqualByComparingTo(Money.ZERO);
         assertThat(ledgerService.reconcile().isBalanced()).isTrue();
     }
 

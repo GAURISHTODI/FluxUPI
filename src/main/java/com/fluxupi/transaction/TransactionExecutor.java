@@ -48,13 +48,16 @@ public class TransactionExecutor {
     private final CreditLineRepository creditLineRepository;
     private final TransactionRepository transactionRepository;
     private final LedgerService ledgerService;
+    private final jakarta.persistence.EntityManager entityManager;
 
     public TransactionExecutor(CreditLineRepository creditLineRepository,
                                TransactionRepository transactionRepository,
-                               LedgerService ledgerService) {
+                               LedgerService ledgerService,
+                               jakarta.persistence.EntityManager entityManager) {
         this.creditLineRepository = creditLineRepository;
         this.transactionRepository = transactionRepository;
         this.ledgerService = ledgerService;
+        this.entityManager = entityManager;
     }
 
     @Transactional
@@ -82,14 +85,19 @@ public class TransactionExecutor {
         Transaction original = transactionRepository.findById(originalTransactionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Transaction", originalTransactionId));
 
-        // Lock before touching either row so a reversal and a concurrent spend
-        // on the same line cannot interleave.
+        // Take the credit-line row lock first, then re-read the original under
+        // that lock. Two threads racing to reverse the same spend serialise
+        // here; the second one reads the now-REVERSED status and its
+        // markReversed() below fails the state-machine guard, rather than acting
+        // on a stale SUCCESS snapshot and crediting the limit twice.
         CreditLine creditLine = lockCreditLine(original.getCreditLine().getId());
+        entityManager.refresh(original);
 
         Transaction reversal = Transaction.reversal(original, idempotencyKey, fingerprint, reason);
 
         // The state machine is what prevents double reversal: SUCCESS is the
-        // only state with an edge to REVERSED, so a second attempt throws.
+        // only state with an edge to REVERSED, so a second attempt throws
+        // IllegalStateTransitionException.
         original.markReversed();
         creditLine.restoreLimit(original.getAmount());
 
