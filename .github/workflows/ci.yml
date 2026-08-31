@@ -23,7 +23,9 @@ jobs:
           cache: maven
 
       - name: Build, unit tests, and Testcontainers integration tests
-        run: ./mvnw -B verify
+        run: |
+          chmod +x ./mvnw
+          ./mvnw -B verify
 
       - name: Publish test report
         if: always()
