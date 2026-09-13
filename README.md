@@ -29,15 +29,25 @@ by real UPI credit products.
 
 ```mermaid
 flowchart LR
-    User -->|applies| CreditLineService
-    CreditLineService -->|underwriting rules| Lender
-    Lender -->|approves/rejects| CreditLineService
-    User -->|spends| TransactionService
-    TransactionService -->|idempotency check| TransactionService
-    TransactionService -->|writes| LedgerService
-    LedgerService -->|debit + credit rows| Postgres[(PostgreSQL)]
-    TransactionService -->|generates| RepaymentService
-    RepaymentService -->|EMI schedule| Postgres
+    User -->|POST /credit-lines| CreditLineService
+    CreditLineService -->|UnderwritingContext| UnderwritingEngine
+    UnderwritingEngine -->|runs| Rules[MinIncome / Exposure / LenderActive rules]
+    Rules -->|reads params| Lender
+    UnderwritingEngine -->|UnderwritingDecision| CreditLineService
+    CreditLineService -->|approve / reject via guarded transition| Postgres[(PostgreSQL)]
+
+    User -->|POST /transactions| TransactionService
+    TransactionService -->|idempotency: key lookup + fingerprint| TransactionService
+    TransactionService -->|delegates one atomic tx| TransactionExecutor
+    TransactionExecutor -->|SELECT ... FOR UPDATE| Postgres
+    TransactionExecutor -->|balanced debit + credit rows| LedgerService
+    LedgerService -->|>= 2 ledger_entries, same tx as limit update| Postgres
+    TransactionExecutor -->|settled| DomainEventPublisher
+    DomainEventPublisher -.->|mock webhook| MockLenderWebhookListener
+
+    User -->|POST /repayments| RepaymentService
+    RepaymentService -->|InterestStrategy: flat / reducing| RepaymentExecutor
+    RepaymentExecutor -->|allocate interest-first, restore principal headroom| Postgres
 ```
 
 ```mermaid
